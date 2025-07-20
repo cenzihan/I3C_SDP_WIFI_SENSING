@@ -1,0 +1,63 @@
+# --- 项目和路径配置 ---
+project_name: "sdp_wifi_sensing" # 项目名称，用于日志和模型保存
+dataset_root: "datasets" # 原始数据集的根目录
+preprocessed_data_dir: "datasets/predata" # 经过预处理后，保存.pt文件的目录
+scenes_to_process: # 需要处理的原始数据场景列表
+ 
+  - "Home_Scene2"
+
+# --- 数据处理参数 ---
+max_packets_per_interval: 70 # 标准化参数：每个2秒的时间窗口内，统一处理的数据包数量
+
+# --- 训练数据源配置 ---
+# 指定用于训练的数据集。可以是场景名称的列表 (例如 ["Home_Scene1", "Home_Scene2"])。
+# 或者使用 ["all"] 来自动包含 predata/ 目录下的所有场景。
+training_data_sources: ["Home_Scene1"]
+
+# --- 模型配置 ---
+model:
+  name: "simple_transformer" # 模型选择，可选: "simple_transformer", "vit"
+  
+  # --- 模型通用参数 ---
+  input_channels: 16 # 输入特征图的通道数 (2个房间 * (4个实部dB流 + 4个虚部dB流))
+  feature_dim: 250 # 特征维度 (即每个天线流的子载波数量)
+  num_classes: 3 # 分类任务的类别数 (即房间数量)
+  embed_dim: 256 # Transformer模型的内部嵌入维度
+  num_heads: 8 # Transformer中的多头注意力头数
+  num_layers: 6 # Transformer编码器的层数
+  hidden_dim: 1024 # Transformer前馈网络的隐藏层维度
+  dropout: 0.1 # Dropout比例
+
+# --- ViT (Vision Transformer) 专属配置 ---
+vit:
+  patch_size: 10 # ViT模型将输入图像分割成的小块(patch)的大小 (例如, 10x10)
+
+# --- 训练过程配置 ---
+training:
+  epochs: 100 # 训练的总轮数
+  batch_size: 128 # 每个批次的大小
+  learning_rate: 0.0001 # 学习率
+  optimizer: "AdamW" # 优化器类型
+  weight_decay: 0.01 # 权重衰减 (L2正则化)
+  patience: 30 # 早停(Early Stopping)的耐心轮数，即连续N轮验证集损失没有改善后停止训练
+  
+  # --- 损失函数配置 ---
+  # 用于BCE损失的类别权重，手动设置为一个预估值，用于缓解类别不平衡问题
+  # 计算方式: pos_weight = 负样本数 / 正样本数
+  pos_weight: [4.4, 4, 3.5]
+  
+  # 损失函数组合配置, 可以配置一个或多个损失函数及其权重
+  loss_components:
+    - name: "bce"    # 名称: 'bce' (二元交叉熵)
+      weight: 0.5    # 在总损失中的权重
+      params: {}     # 'bce'会自动使用上面的全局pos_weight
+    - name: "focal"  # 名称: 'focal' (焦点损失)
+      weight: 0.5    # 在总损失中的权重
+      params:
+        alpha: 0.25  # Focal Loss的alpha参数
+        gamma: 2.0   # Focal Loss的gamma参数
+
+# --- 环境与运行配置 ---
+gpus: "0,1,2,3" # 使用的GPU设备ID (例如 "0" 或 "0,1")
+num_workers: 4 # 数据加载器使用的工作进程数
+seed: 42 # 全局随机种子，用于保证实验可复现 

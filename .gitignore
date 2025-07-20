@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Large data, models, and experiment results
+# Ignore the contents of these directories, but keep the directories themselves
+# by not ignoring the .gitkeep file.
+/datasets/*
+
+/models/*
+
+/results/*
+
+/training/*
+
+
+# Temporary files
+*.tmp
+*.bak
+*.log
