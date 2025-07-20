@@ -176,36 +176,61 @@ def find_file_groups(data_dir: str, scenes: List[str]) -> List[Dict[str, str]]:
 
 def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader]:
     """
-    Creates training and validation dataloaders from preprocessed data sources
-    specified in the config.
+    Creates training and validation dataloaders.
+    Supports two strategies defined in config['data_split']['strategy']:
+    1. 'preprocess': Loads from pre-split 'train' and 'val' directories.
+    2. 'on_the_fly': Loads all data and performs a random split.
     """
     base_dir = config['preprocessed_data_dir']
     sources = config['training_data_sources']
+    strategy = config.get('data_split', {}).get('strategy', 'preprocess')
+    batch_size = config['training']['batch_size']
+    num_workers = config['num_workers']
 
-    # Handle 'all' keyword to automatically include all subdirectories
     if "all" in sources:
         sources = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
         logging.info(f"Detected 'all' keyword. Using all available data sources: {sources}")
 
-    train_dirs = [os.path.join(base_dir, source, 'train') for source in sources]
-    val_dirs = [os.path.join(base_dir, source, 'val') for source in sources]
+    if strategy == 'preprocess':
+        logging.info("Using 'preprocess' split strategy. Loading from pre-split train/val directories.")
+        train_dirs = [os.path.join(base_dir, source, 'train') for source in sources]
+        val_dirs = [os.path.join(base_dir, source, 'val') for source in sources]
 
-    logging.info(f"Loading training data from: {train_dirs}")
-    logging.info(f"Loading validation data from: {val_dirs}")
+        train_dataset = PreprocessedCSIDataset(train_dirs)
+        val_dataset = PreprocessedCSIDataset(val_dirs)
+    
+    elif strategy == 'on_the_fly':
+        logging.info("Using 'on_the_fly' split strategy. Loading all data for a new random split.")
+        # Load data from both train and val directories for a full dataset
+        all_data_dirs = []
+        for source in sources:
+            all_data_dirs.append(os.path.join(base_dir, source, 'train'))
+            all_data_dirs.append(os.path.join(base_dir, source, 'val'))
 
-    train_dataset = PreprocessedCSIDataset(train_dirs)
-    val_dataset = PreprocessedCSIDataset(val_dirs)
+        full_dataset = PreprocessedCSIDataset(all_data_dirs)
+        
+        # Perform the random split
+        val_split = config['data_split']['val_size']
+        train_size = int((1.0 - val_split) * len(full_dataset))
+        val_size = len(full_dataset) - train_size
+        
+        generator = torch.Generator().manual_seed(config['seed'])
+        train_dataset, val_dataset = torch.utils.data.random_split(
+            full_dataset, [train_size, val_size], generator=generator
+        )
+    else:
+        raise ValueError(f"Unknown data split strategy: '{strategy}'")
 
     logging.info(f"Total training samples: {len(train_dataset)}")
     logging.info(f"Total validation samples: {len(val_dataset)}")
 
     train_loader = DataLoader(
-        train_dataset, batch_size=config['training']['batch_size'], shuffle=True,
-        num_workers=config['num_workers'], pin_memory=True
+        train_dataset, batch_size=batch_size, shuffle=True,
+        num_workers=num_workers, pin_memory=True
     )
     val_loader = DataLoader(
-        val_dataset, batch_size=config['training']['batch_size'], shuffle=False,
-        num_workers=config['num_workers'], pin_memory=True
+        val_dataset, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, pin_memory=True
     )
 
     return train_loader, val_loader 

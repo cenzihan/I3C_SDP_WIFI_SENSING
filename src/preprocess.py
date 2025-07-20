@@ -110,7 +110,7 @@ def process_and_save_data_parallel(config):
         for group in val_groups: group['split'] = 'val'
             
         all_groups = train_groups + val_groups
-        
+            
         tasks = [(group, config, scene_output_dir) for group in all_groups]
 
         total_samples = 0

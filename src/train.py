@@ -140,7 +140,15 @@ def main():
             best_val_loss = val_loss
             epochs_no_improve = 0
             os.makedirs("models", exist_ok=True)
-            model_save_path = os.path.join("models", f"{config['project_name']}_best.pth")
+            
+            # Format the model filename using placeholders from config
+            model_filename = config['training']['model_save_name'].format(
+                project_name=config['project_name'],
+                model_name=config['model']['name'],
+                timestamp=timestamp
+            )
+            model_save_path = os.path.join("models", model_filename)
+            
             torch.save(model.state_dict(), model_save_path)
             logger.info(f"Validation loss improved. Saved model to {model_save_path}")
         else:

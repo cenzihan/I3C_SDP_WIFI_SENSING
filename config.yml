@@ -1,18 +1,37 @@
 # --- 项目和路径配置 ---
 project_name: "sdp_wifi_sensing" # 项目名称，用于日志和模型保存
 dataset_root: "datasets" # 原始数据集的根目录
-preprocessed_data_dir: "datasets/predata" # 经过预处理后，保存.pt文件的目录
-scenes_to_process: # 需要处理的原始数据场景列表
- 
+
+# 随机种子，用于确保实验的可复现性
+seed: 42
+
+# --- 数据预处理与加载配置 ---
+# 预处理后的数据存放根目录
+preprocessed_data_dir: "datasets/predata"
+
+# 需要进行预处理的原始数据场景列表
+scenes_to_process:
+  - "Home_Scene1"
   - "Home_Scene2"
 
-# --- 数据处理参数 ---
-max_packets_per_interval: 70 # 标准化参数：每个2秒的时间窗口内，统一处理的数据包数量
+# 数据集划分策略配置
+data_split:
+  # 划分策略, 可选值:
+  # 'preprocess': 在预处理阶段按文件组划分。更科学，避免数据泄露。
+  # 'on_the_fly': 训练时动态随机划分。更灵活，但可能存在轻微数据泄露。
+  strategy: 'on_the_fly'
+  # 验证集所占比例 (仅在 'on_the_fly' 策略下生效)
+  val_size: 0.2
 
-# --- 训练数据源配置 ---
-# 指定用于训练的数据集。可以是场景名称的列表 (例如 ["Home_Scene1", "Home_Scene2"])。
-# 或者使用 ["all"] 来自动包含 predata/ 目录下的所有场景。
-training_data_sources: ["Home_Scene1"]
+# 参与训练的数据源（对应 preprocessed_data_dir 下的子目录名）
+# 可以是单个场景，也可以是多个场景的组合。
+# 使用 'all' 关键字可以自动包含所有已处理的场景。
+training_data_sources:
+  - "Home_Scene1"
+
+# 每个2秒时间窗内，保留的最大数据包数量
+# 如果数据包数量不足，会进行零填充
+max_packets_per_interval: 70
 
 # --- 模型配置 ---
 model:
@@ -34,12 +53,17 @@ vit:
 
 # --- 训练过程配置 ---
 training:
-  epochs: 100 # 训练的总轮数
+  # 保存的最佳模型的文件名。
+  # 支持占位符: {project_name}, {model_name}, {timestamp}
+  model_save_name: "{project_name}_{model_name}_{timestamp}_best.pth"
+  
+  # 训练的总轮数
+  epochs: 500
   batch_size: 128 # 每个批次的大小
   learning_rate: 0.0001 # 学习率
   optimizer: "AdamW" # 优化器类型
   weight_decay: 0.01 # 权重衰减 (L2正则化)
-  patience: 30 # 早停(Early Stopping)的耐心轮数，即连续N轮验证集损失没有改善后停止训练
+  patience: 100 # 早停(Early Stopping)的耐心轮数，即连续N轮验证集损失没有改善后停止训练
   
   # --- 损失函数配置 ---
   # 用于BCE损失的类别权重，手动设置为一个预估值，用于缓解类别不平衡问题
@@ -59,5 +83,4 @@ training:
 
 # --- 环境与运行配置 ---
 gpus: "0,1,2,3" # 使用的GPU设备ID (例如 "0" 或 "0,1")
-num_workers: 4 # 数据加载器使用的工作进程数
-seed: 42 # 全局随机种子，用于保证实验可复现 
+num_workers: 4 # 数据加载器使用的工作进程数 
