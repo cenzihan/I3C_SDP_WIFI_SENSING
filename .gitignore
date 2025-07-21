@@ -13,12 +13,15 @@ __pycache__/
 # Ignore the contents of these directories, but keep the directories themselves
 # by not ignoring the .gitkeep file.
 /datasets/*
-
+!/datasets/.gitkeep
 /models/*
-
+!/models/.gitkeep
 /results/*
-
+!/results/.gitkeep
 /training/*
+!/training/.gitkeep
+/asset/*
+!/asset/.gitkeep
 
 
 # Temporary files

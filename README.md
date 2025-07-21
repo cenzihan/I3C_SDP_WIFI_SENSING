@@ -28,7 +28,19 @@ chmod +x env/*.sh
 ```
 *注意: `setup_env.sh` 脚本将创建并激活一个名为 `sdp-wifi-sensing` 的Conda环境。后续的核心脚本 (`preprocess.sh`, `start_training.sh`) 会自动激活此环境。*
 
-### 第2步：数据预处理
+### 第2步：解压原始数据集
+
+在进行数据预处理之前，您需要先解压原始的数据文件。（这可能需要十几分钟）
+
+```bash
+cd datasets
+chmod +x start_extract.sh
+./start_extract.sh
+cd ..
+```
+*此脚本会解压项目所需的原始CSI数据。*
+
+### 第3步：数据预处理
 
 此步骤负责将原始的 `.txt` 数据文件转换为模型能够读取的 `.pt` 张量文件。脚本会根据配置文件 (`config.yml` 中 `scenes_to_process` 列表)指定的场景，在 `datasets/predata/` 目录下为每个场景创建独立的子目录来存放预处理结果。
 
@@ -38,7 +50,7 @@ chmod +x env/*.sh
 ```
 *例如，在处理 `Home_Scene1` 和 `Home_Scene2` 后，会生成 `datasets/predata/Home_Scene1` 和 `datasets/predata/Home_Scene2` 两个目录。*
 
-### 第3步：计算类别权重 
+### 第4步：计算类别权重 
 
 由于数据集中可能存在类别不平衡（例如“无人”状态显著多于“有人”状态），建议为损失函数计算类别权重。此脚本会分析指定的训练数据源，并计算出相应的 `pos_weight`。
 
@@ -50,7 +62,7 @@ python scripts/calculate_pos_weight.py
 
 *注意：每当 `config.yml` 中的 `training_data_sources` 配置发生变化时，建议重新运行此步骤。*
 
-### 第4步：开始训练
+### 第5步：开始训练
 
 完成以上步骤后，即可开始训练模型。训练脚本将依据 `config.yml` 的配置（如加载的数据源、使用的模型等）来启动训练流程。
 
@@ -61,16 +73,9 @@ python scripts/calculate_pos_weight.py
 在运行时，也可以通过命令行参数覆盖配置文件中的设置，例如更改学习率：
 `./scripts/start_training.sh --training.learning_rate 0.0005`
 
-### 第5步：使用TensorBoard监控训练
+### 第6步：使用TensorBoard监控训练
 
 训练过程中的指标数据（如损失、学习率、准确率等）会被记录在 `training/` 目录下。可使用TensorBoard对这些数据进行可视化。
-
-```bash
-# 在新的终端中运行此命令 (请确保已激活对应的Conda环境)
-conda activate sdp-wifi-sensing
-tensorboard --logdir training
-```
-之后在浏览器中打开提示的URL (通常是 `http://localhost:6006/`) 即可查看。
 
 ## 文件结构
 
