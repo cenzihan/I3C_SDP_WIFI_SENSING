@@ -5,12 +5,41 @@ import os
 import datetime
 from tqdm import tqdm
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import multilabel_confusion_matrix
 
 from .config import get_config
 from .utils import set_seed, get_logger
 from .model import get_model
 from .dataset import create_dataloaders
 from .losses import get_loss_function
+
+
+def log_confusion_matrix(y_true, y_pred, epoch, writer, results_dir, class_names=None):
+    """
+    Calculates, logs, and saves the multilabel confusion matrix.
+    """
+    cm = multilabel_confusion_matrix(y_true, y_pred)
+    
+    if class_names is None:
+        class_names = [f"Class {i}" for i in range(cm.shape[0])]
+
+    for i, (matrix, class_name) in enumerate(zip(cm, class_names)):
+        fig, ax = plt.subplots(figsize=(6, 4))
+        sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', 
+                    xticklabels=['Predicted Negative', 'Predicted Positive'],
+                    yticklabels=['Actual Negative', 'Actual Positive'])
+        ax.set_title(f'Confusion Matrix for {class_name} (Epoch {epoch+1})')
+        plt.tight_layout()
+        
+        # Save figure to results directory
+        fig_path = os.path.join(results_dir, f"cm_epoch_{epoch+1}_class_{i}.png")
+        plt.savefig(fig_path)
+        plt.close(fig) # Close figure to free memory
+        
+        # Log to TensorBoard
+        writer.add_figure(f"ConfusionMatrix/{class_name}", fig, global_step=epoch)
 
 
 def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, logger):
@@ -36,7 +65,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, logg
     logger.info(f"Epoch {epoch+1} - Training Loss: {avg_loss:.4f}")
     return avg_loss
 
-def validate_one_epoch(model, dataloader, criterion, device, epoch, logger):
+def validate_one_epoch(model, dataloader, criterion, device, epoch, logger, writer, results_dir, log_every_n_epochs):
     model.eval()
     total_loss = 0.0
     all_preds = []
@@ -80,6 +109,15 @@ def validate_one_epoch(model, dataloader, criterion, device, epoch, logger):
         f"Overall Accuracy: {overall_accuracy:.2f}%, "
         f"Exact Match Ratio: {exact_match_ratio:.2f}%"
     )
+
+    # --- Generate and Save Confusion Matrix ---
+    if (epoch + 1) % log_every_n_epochs == 0:
+        logger.info(f"Epoch {epoch+1}: Logging confusion matrix.")
+        # Assuming class names can be retrieved or are predefined.
+        # For now, we'll use generic names.
+        # You might want to pass class names from your dataset configuration.
+        log_confusion_matrix(all_labels, all_preds, epoch, writer, results_dir)
+
     return avg_loss, overall_accuracy, exact_match_ratio
 
 def main():
@@ -87,8 +125,11 @@ def main():
     set_seed(config['seed'])
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = f"training/{config['project_name']}/{timestamp}"
+    run_name = f"{config['project_name']}/{timestamp}"
+    log_dir = f"training/{run_name}"
+    results_dir = f"results/{run_name}" # Create a corresponding results directory
     os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(results_dir, exist_ok=True) # Create the results directory
     
     logger = get_logger(os.path.join(log_dir, "training.log"))
     writer = SummaryWriter(log_dir)
@@ -122,11 +163,14 @@ def main():
 
     best_val_loss = float('inf')
     epochs_no_improve = 0
+    log_every_n_epochs = config['training'].get('log_every_n_epochs', 1) # Default to 1 if not set
     
     logger.info("--- Starting Training ---")
     for epoch in range(config['training']['epochs']):
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, epoch, logger)
-        val_loss, val_accuracy, val_exact_match = validate_one_epoch(model, val_loader, criterion, device, epoch, logger)
+        val_loss, val_accuracy, val_exact_match = validate_one_epoch(
+            model, val_loader, criterion, device, epoch, logger, writer, results_dir, log_every_n_epochs
+        )
         
         scheduler.step()
         

@@ -23,7 +23,8 @@
 
 ```bash
 chmod +x scripts/*.sh
-./scripts/setup_env.sh
+chmod +x env/*.sh
+./env/setup_env.sh
 ```
 *注意: `setup_env.sh` 脚本将创建并激活一个名为 `sdp-wifi-sensing` 的Conda环境。后续的核心脚本 (`preprocess.sh`, `start_training.sh`) 会自动激活此环境。*
 
@@ -37,7 +38,7 @@ chmod +x scripts/*.sh
 ```
 *例如，在处理 `Home_Scene1` 和 `Home_Scene2` 后，会生成 `datasets/predata/Home_Scene1` 和 `datasets/predata/Home_Scene2` 两个目录。*
 
-### 第3步：计算类别权重 (重要步骤)
+### 第3步：计算类别权重 
 
 由于数据集中可能存在类别不平衡（例如“无人”状态显著多于“有人”状态），建议为损失函数计算类别权重。此脚本会分析指定的训练数据源，并计算出相应的 `pos_weight`。
 

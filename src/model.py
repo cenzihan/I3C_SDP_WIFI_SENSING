@@ -73,7 +73,13 @@ class ViT(nn.Module):
         # Image size is (seq_len, feature_dim) -> (70, 250)
         # Channels is 16
         image_size = (config['max_packets_per_interval'], config['model']['feature_dim']) 
-        patch_size = (config['vit']['patch_size'], config['vit']['patch_size'])
+        
+        patch_size_config = config['vit']['patch_size']
+        if isinstance(patch_size_config, int):
+            patch_size = (patch_size_config, patch_size_config)
+        else:
+            patch_size = tuple(patch_size_config)
+
         num_patches = (image_size[0] // patch_size[0]) * (image_size[1] // patch_size[1])
         patch_dim = config['model']['input_channels'] * patch_size[0] * patch_size[1]
 
