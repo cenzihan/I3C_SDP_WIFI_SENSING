@@ -17,10 +17,11 @@ scenes_to_process:
 # 数据集划分策略配置
 data_split:
   # 划分策略, 可选值:
-  # 'preprocess': 在预处理阶段按文件组划分。更科学，避免数据泄露。
-  # 'on_the_fly': 训练时动态随机划分。更灵活，但可能存在轻微数据泄露。
-  strategy: 'on_the_fly'
-  # 验证集所占比例 (仅在 'on_the_fly' 策略下生效)
+  # 'preprocess': 在预处理阶段按文件组划分。
+  # 'on_the_fly': 训练时将所有指定场景的数据合并后，进行一次总的随机划分。
+  # 'group_level_random_split': 训练时对每个原始文件组产生的样本进行内部随机划分，然后合并。最精细的划分。
+  strategy: 'group_level_random_split'
+  # 验证集所占比例 (在 'on_the_fly' 和 'group_level_random_split' 策略下生效)
   val_size: 0.2
 
 # 参与训练的数据源（对应 preprocessed_data_dir 下的子目录名）
@@ -52,6 +53,7 @@ vit:
   # Vision Transformer 的 Patch 大小。
   # 可以是单个整数（例如 10，代表 10x10 的方形Patch），
   # 也可以是 [height, width] 格式的列表（例如 [4, 25]，代表 4x25 的矩形Patch）。
+  # 输入大小为[16,70,250]，所以用的[7,10]
   patch_size: [7, 10]
 
 # --- 训练过程配置 ---

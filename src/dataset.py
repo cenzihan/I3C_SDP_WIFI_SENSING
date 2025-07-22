@@ -6,8 +6,9 @@ import glob
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from tqdm import tqdm
+from collections import defaultdict
 
 # A global flag to ensure the debug print happens only once
 _HAS_PARSED_NON_ZERO = False
@@ -72,6 +73,11 @@ class PreprocessedCSIDataset(Dataset):
     """
     def __init__(self, data_dirs: List[str]):
         self.sample_files = []
+        
+        # If data_dirs is not provided, we assume manual population of sample_files later.
+        if not data_dirs:
+            return # Just create an empty dataset object
+        
         for data_dir in data_dirs:
             files = sorted(glob.glob(os.path.join(data_dir, "sample_*.pt")))
             if not files:
@@ -218,6 +224,63 @@ def create_dataloaders(config: Dict) -> Tuple[DataLoader, DataLoader]:
         train_dataset, val_dataset = torch.utils.data.random_split(
             full_dataset, [train_size, val_size], generator=generator
         )
+    elif strategy == 'group_level_random_split':
+        logging.info("Using 'group_level_random_split' strategy. Splitting within each file group.")
+        
+        # 1. Load all files from the specified sources
+        all_files = []
+        for source in sources:
+            source_dir = os.path.join(base_dir, source)
+            for split in ['train', 'val']:
+                split_dir = os.path.join(source_dir, split)
+                if os.path.isdir(split_dir):
+                    all_files.extend([os.path.join(split_dir, f) for f in os.listdir(split_dir) if f.endswith('.pt')])
+
+        if not all_files:
+            raise ValueError("No preprocessed .pt files found for the specified sources.")
+
+        # 2. Group files by their original file group key
+        file_groups = defaultdict(list)
+        for f_path in all_files:
+            # Filename format: sample_{key}_{index}.pt
+            # We want to extract the {key} part.
+            filename = os.path.basename(f_path)
+            parts = filename.replace('sample_', '').replace('.pt', '').split('_')
+            group_key = '_'.join(parts[:-1]) # Everything except the last part (the index)
+            file_groups[group_key].append(f_path)
+
+        # 3. Split each group and collect subsets
+        train_subsets, val_subsets = [], []
+        val_split = config['data_split']['val_size']
+        generator = torch.Generator().manual_seed(config['seed'])
+        
+        for group_key, files_in_group in file_groups.items():
+            if len(files_in_group) < 2: continue # Skip groups with too few samples to split
+            
+            # Create a dataset for this specific group
+            group_dataset = PreprocessedCSIDataset([]) # Create an empty dataset
+            group_dataset.sample_files = sorted(files_in_group) # Manually assign its files
+
+            train_size = int((1.0 - val_split) * len(group_dataset))
+            val_size = len(group_dataset) - train_size
+            
+            # Ensure we can actually split it
+            if train_size == 0 or val_size == 0:
+                logging.warning(f"Group '{group_key}' with {len(files_in_group)} samples is too small to be split. Adding all to training set.")
+                train_subsets.append(group_dataset)
+                continue
+
+            group_train_subset, group_val_subset = torch.utils.data.random_split(
+                group_dataset, [train_size, val_size], generator=generator
+            )
+            train_subsets.append(group_train_subset)
+            val_subsets.append(group_val_subset)
+
+        if not train_subsets:
+            raise ValueError("No data groups were large enough to be split.")
+
+        train_dataset = ConcatDataset(train_subsets)
+        val_dataset = ConcatDataset(val_subsets)
     else:
         raise ValueError(f"Unknown data split strategy: '{strategy}'")
 

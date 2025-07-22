@@ -138,8 +138,15 @@ def main():
     for key, value in config.items():
         logger.info(f"  {key}: {value}")
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = config['gpus']
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # --- GPU Setup: Sanitize the GPU string from config ---
+    gpu_ids_str = config.get('gpus')
+    if gpu_ids_str:
+        # Remove all whitespace and replace full-width commas with standard commas
+        cleaned_gpu_ids = "".join(str(gpu_ids_str).replace("，", ",").split())
+        os.environ["CUDA_VISIBLE_DEVICES"] = cleaned_gpu_ids
+        logger.info(f"Sanitized and set CUDA_VISIBLE_DEVICES to: '{cleaned_gpu_ids}'")
+
+    device = torch.device("cuda" if torch.cuda.is_available() and gpu_ids_str else "cpu")
     logger.info(f"Using device: {device}")
     
     logger.info("--- Starting Data Loading ---")
@@ -148,7 +155,8 @@ def main():
     
     model = get_model(config)
     
-    if torch.cuda.device_count() > 1 and config['gpus']:
+    # DataParallel will automatically use all GPUs made visible by CUDA_VISIBLE_DEVICES
+    if torch.cuda.device_count() > 1:
         logger.info(f"Using {torch.cuda.device_count()} GPUs!")
         model = torch.nn.DataParallel(model)
         
