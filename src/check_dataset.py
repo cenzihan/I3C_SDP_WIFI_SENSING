@@ -11,24 +11,16 @@ def analyze_data_file(file_path):
         
     try:
         with open(file_path, 'r') as f:
-            # Read the first line to check format
-            first_line = f.readline()
-            if not first_line:
-                print("  [!] Error: File is empty.\n")
-                return
+            lines = f.readlines()
 
-            data_points = first_line.strip().split()
-            num_columns = len(data_points)
-            
-            # Efficiently count lines and get the last line
-            line_count = 1
-            last_line = first_line
-            for line in f:
-                last_line = line
-                line_count += 1
+        if not lines:
+            print("  [!] Error: File is empty.\n")
+            return
+
+        line_count = len(lines)
+        first_line_points = lines[0].strip().split()
+        num_columns = len(first_line_points)
         
-        last_line_data_points = last_line.strip().split()
-
         print(f"  [*] Total Packets (Lines): {line_count}")
         print(f"  [*] Data Points per Packet (Columns): {num_columns}")
 
@@ -40,11 +32,18 @@ def analyze_data_file(file_path):
         else:
             print(f"  [!] Warning: Unexpected number of columns ({num_columns}). Check data format.")
             
-        print(f"\n  [*] Sample of the first packet (first 10 data points):")
-        print(f"      {' '.join(data_points[:10])} ...")
+        print(f"\n  [*] Sample and length check for the first 10 packets:")
+        for i, line in enumerate(lines[:10]):
+            parts = line.strip().split()
+            print(f"      Line {i+1:03d}: Length = {len(parts):<5} | Sample: {' '.join(parts[:13])} ...")
         
-        print(f"\n  [*] Sample of the last packet (first 10 data points):")
-        print(f"      {' '.join(last_line_data_points[:10])} ...")
+        if line_count > 10:
+            print(f"\n  [*] Sample and length check for the last 10 packets:")
+            # Handle cases where the file has 11-19 lines etc.
+            start_index = max(10, line_count - 10)
+            for i, line in enumerate(lines[start_index:], start=start_index):
+                parts = line.strip().split()
+                print(f"      Line {i+1:03d}: Length = {len(parts):<5} | Sample: {' '.join(parts[:13])} ...")
 
     except Exception as e:
         print(f"  [!] An error occurred: {e}")
@@ -89,20 +88,27 @@ def analyze_groundtruth_file(file_path):
 def main():
     # --- Pre-defined list of files to check ---
     files_to_check = [
-        # Room A Data and Groundtruth
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomA/2to2_Scene3_GreenPlantFan_1/RoomAData/1101_01.txt",
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomA/2to2_Scene3_GreenPlantFan_1/RoomAData/1101_02.txt",
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomA/2to2_Scene3_GreenPlantFan_1/RoomAData/1101_03.txt",
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomA/2to2_Scene3_GreenPlantFan_1/LivingRoomGroundtruth/groundtruth_1121_01.txt",
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomA/2to2_Scene3_GreenPlantFan_1/RoomAGroundtruth/groundtruth_1101_01.txt",
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomA/2to2_Scene3_GreenPlantFan_1/RoomAGroundtruth/groundtruth_1101_02.txt",
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomA/2to2_Scene3_GreenPlantFan_1/RoomAGroundtruth/groundtruth_1101_03.txt",
+        # OfficeScenario Glass_Wall_Scenario
+        # "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig2/Fan/Processed_Data/1m.txt",
+        # "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig2/Fan/Processed_Data/2m.txt",
+        # "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig2/Fan/Processed_Data/3m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig2/Fan/Processed_Data/4m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/80MHzConfig2fixgain/Fan/Processed_Data/1m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/80MHzConfig2fixgain/Fan/Processed_Data/2m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/80MHzConfig2fixgain/Fan/Processed_Data/3m.txt",
+        # "datasets/OfficeScenario/Glass_Wall_Scenario/Groundtruth/ceiling_mount/20MHzConfig1/Fan/1m.txt",
+        # "datasets/OfficeScenario/Glass_Wall_Scenario/Groundtruth/ceiling_mount/20MHzConfig1/Fan/2m.txt",
+        
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Groundtruth/ceiling_mount/80MHzConfig2fixgain/Fan/1m.txt",
 
-        # Room B Data and Groundtruth
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomB/2to2_Scene3_GreenPlantFan_1/RoomBData/1111_01.txt",
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomB/2to2_Scene3_GreenPlantFan_1/RoomBData/1111_02.txt",
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomB/2to2_Scene3_GreenPlantFan_1/RoomBData/1111_03.txt",
-        "datasets/Home_Scene1/Home_Suite1/layout_1/5G_80M/Scene3_RoomB/2to2_Scene3_GreenPlantFan_1/RoomBGroundtruth/groundtruth_1111_01.txt"
+        # OfficeScenario Meeting_Room_Scene_2
+        # "datasets/OfficeScenario/Meeting_Room_Scene_2/Room1/Groundtruth/Stream1x4_Config1/001_0_0000_3.txt",
+        # "datasets/OfficeScenario/Meeting_Room_Scene_2/Room1/Stream1x4_Config1/Processed_Data/001_0_0000_3.txt",
+        # "datasets/OfficeScenario/Meeting_Room_Scene_2/Room1/Groundtruth/Stream2x4_Config1/101_0_0000_3.txt",
+        # "datasets/OfficeScenario/Meeting_Room_Scene_2/Room1/Stream2x4_Config1/Processed_Data/101_0_0000_3.txt",
+        
+        
+        
     ]
 
     print("===== Starting Dataset Integrity Check =====\n")
