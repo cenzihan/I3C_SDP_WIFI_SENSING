@@ -55,18 +55,30 @@ def process_group(args):
                         padded_b[packet_idx] = feat
                         packet_idx += 1
 
-            fused_data = np.concatenate((padded_a, padded_b), axis=1)
-            data_tensor = torch.from_numpy(fused_data.transpose(1, 0, 2).copy())
+            # --- MODIFICATION: Keep data separate instead of fusing ---
+            # fused_data = np.concatenate((padded_a, padded_b), axis=1)
+            # data_tensor = torch.from_numpy(fused_data.transpose(1, 0, 2).copy())
+            
+            # Create two separate tensors, transposed for model input (C, H, W)
+            tensor_a = torch.from_numpy(padded_a.transpose(1, 0, 2).copy())
+            tensor_b = torch.from_numpy(padded_b.transpose(1, 0, 2).copy())
 
-            label_a = gt_a[i] if i < len(gt_a) else 0
-            label_b = gt_b[i] if i < len(gt_b) else 0
-            label_lr = gt_lr[i] if i < len(gt_lr) else 0
+            # --- MODIFICATION: Binarize labels (0 vs >0) and revert to a single tensor ---
+            # This aligns with the new goal of binary classification (presence/absence)
+            # The (> 0) logic correctly handles 1 and 2 as "presence" (True -> 1).
+            label_a = (gt_a[i] > 0).astype(np.int64) if i < len(gt_a) else 0
+            label_b = (gt_b[i] > 0).astype(np.int64) if i < len(gt_b) else 0
+            label_lr = (gt_lr[i] > 0).astype(np.int64) if i < len(gt_lr) else 0
+            
+            # Revert to a single FloatTensor for BCE-based losses
             label_tensor = torch.from_numpy(np.array([label_a, label_b, label_lr], dtype=np.float32))
             
             # Use a unique name for the sample to avoid collisions
             sample_unique_id = f"{group['key']}_{i}"
             save_path = os.path.join(scene_output_dir, split_name, f"sample_{sample_unique_id}.pt")
-            torch.save((data_tensor, label_tensor), save_path)
+            
+            # The data format will be ((tensor_a, tensor_b), single_label_tensor)
+            torch.save(((tensor_a, tensor_b), label_tensor), save_path)
             samples_processed += 1
         
         return samples_processed

@@ -14,6 +14,7 @@ from .utils import set_seed, get_logger
 from .model import get_model
 from .dataset import create_dataloaders
 from .losses import get_loss_function
+from .model import MultiTaskTransformer # Added import for MultiTaskTransformer
 
 
 def log_confusion_matrix(y_true, y_pred, epoch, writer, results_dir, class_names=None):
@@ -42,30 +43,72 @@ def log_confusion_matrix(y_true, y_pred, epoch, writer, results_dir, class_names
         writer.add_figure(f"ConfusionMatrix/{class_name}", fig, global_step=epoch)
 
 
-def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, logger):
+def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, logger, is_multitask=False):
     model.train()
     total_loss = 0.0
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1} [Train]")
     
+    # --- MODIFICATION: Handle both single and multi-criterion ---
+    if is_multitask:
+        criterion_a, criterion_b, criterion_lr = criterion
+    else:
+        criterion_a, criterion_b, criterion_lr = criterion, criterion, criterion
+
     for inputs, labels in progress_bar:
-        inputs, labels = inputs.to(device), labels.to(device)
+        # --- MODIFICATION: Unpack the dual-stream inputs ---
+        inputs_a, inputs_b = inputs
+        inputs_a, inputs_b, labels = inputs_a.to(device), inputs_b.to(device), labels.to(device)
         
         optimizer.zero_grad()
         
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        
+        # --- MODIFICATION FOR MULTI-TASK ---
+        # Model now returns three separate outputs
+        if is_multitask:
+            output_a, output_b, output_lr = model(inputs_a, inputs_b)
+            
+            # Split labels for each task
+            label_a, label_b, label_lr = labels[:, 0].unsqueeze(1), labels[:, 1].unsqueeze(1), labels[:, 2].unsqueeze(1)
+            
+            # Calculate loss for each task with its specific criterion
+            loss_a = criterion_a(output_a, label_a)
+            loss_b = criterion_b(output_b, label_b)
+            loss_lr = criterion_lr(output_lr, label_lr)
+            
+            # Combine losses (simple sum for now)
+            loss = loss_a + loss_b + loss_lr
+        else: # Original logic for single-output models
+            outputs = model(inputs_a, inputs_b)
+            loss = criterion(outputs, labels)
+
         loss.backward()
         optimizer.step()
         
         total_loss += loss.item()
-        progress_bar.set_postfix(loss=loss.item())
+        
+        # --- MODIFICATION: Log adaptive weights to progress bar ---
+        if isinstance(model, MultiTaskTransformer) or (hasattr(model, 'module') and isinstance(model.module, MultiTaskTransformer)):
+            # Handle DataParallel wrapper
+            inner_model = model.module if hasattr(model, 'module') else model
+            
+            # Access weights via the new properties
+            w1 = inner_model.weights_task1
+            w2 = inner_model.weights_task2
+            w3 = inner_model.weights_task3
+            
+            weights_log = {
+                'W_a1': f"{w1[0].item():.2f}", 'W_b1': f"{w1[1].item():.2f}",
+                'W_a2': f"{w2[0].item():.2f}", 'W_b2': f"{w2[1].item():.2f}",
+                'W_a3': f"{w3[0].item():.2f}", 'W_b3': f"{w3[1].item():.2f}",
+            }
+            progress_bar.set_postfix(loss=loss.item(), **weights_log)
+        else:
+            progress_bar.set_postfix(loss=loss.item())
         
     avg_loss = total_loss / len(dataloader)
     logger.info(f"Epoch {epoch+1} - Training Loss: {avg_loss:.4f}")
     return avg_loss
 
-def validate_one_epoch(model, dataloader, criterion, device, epoch, logger, writer, results_dir, log_every_n_epochs):
+def validate_one_epoch(model, dataloader, criterion, device, epoch, logger, writer, results_dir, log_every_n_epochs, is_multitask=False):
     model.eval()
     total_loss = 0.0
     all_preds = []
@@ -73,16 +116,43 @@ def validate_one_epoch(model, dataloader, criterion, device, epoch, logger, writ
     
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1} [Val]")
     
+    # --- MODIFICATION: Handle both single and multi-criterion ---
+    if is_multitask:
+        criterion_a, criterion_b, criterion_lr = criterion
+    else:
+        criterion_a, criterion_b, criterion_lr = criterion, criterion, criterion
+    
     with torch.no_grad():
         for inputs, labels in progress_bar:
-            inputs, labels = inputs.to(device), labels.to(device)
+            # --- MODIFICATION: Unpack and move dual-stream inputs to device ---
+            inputs_a, inputs_b = inputs
+            inputs_a, inputs_b, labels = inputs_a.to(device), inputs_b.to(device), labels.to(device)
             
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            
+            # --- MODIFICATION FOR MULTI-TASK ---
+            if is_multitask:
+                output_a, output_b, output_lr = model(inputs_a, inputs_b)
+                
+                label_a, label_b, label_lr = labels[:, 0].unsqueeze(1), labels[:, 1].unsqueeze(1), labels[:, 2].unsqueeze(1)
+
+                loss_a = criterion_a(output_a, label_a)
+                loss_b = criterion_b(output_b, label_b)
+                loss_lr = criterion_lr(output_lr, label_lr)
+                
+                loss = loss_a + loss_b + loss_lr
+                
+                # Combine outputs for metric calculation
+                outputs_combined = torch.cat([output_a, output_b, output_lr], dim=1)
+                
+            else: # Original logic for single-output models
+                outputs_combined = model(inputs_a, inputs_b)
+                loss = criterion(outputs_combined, labels)
+
             total_loss += loss.item()
             
-            preds = (torch.sigmoid(outputs) > 0.5).float()
+            # --- MODIFICATION: Calculate predictions for multi-task output ---
+            # Combine outputs and labels to calculate overall metrics
+            
+            preds = (torch.sigmoid(outputs_combined) > 0.5).float()
             all_preds.append(preds.cpu().numpy())
             all_labels.append(labels.cpu().numpy())
             
@@ -93,6 +163,22 @@ def validate_one_epoch(model, dataloader, criterion, device, epoch, logger, writ
     all_preds = np.vstack(all_preds)
     all_labels = np.vstack(all_labels)
     
+    # --- MODIFICATION: Log final weights after validation epoch ---
+    if isinstance(model, MultiTaskTransformer) or (hasattr(model, 'module') and isinstance(model.module, MultiTaskTransformer)):
+        inner_model = model.module if hasattr(model, 'module') else model
+        
+        # Access weights via the new properties
+        w1 = inner_model.weights_task1
+        w2 = inner_model.weights_task2
+        w3 = inner_model.weights_task3
+        
+        logger.info(
+            f"Epoch {epoch+1} - Final Weights: "
+            f"TaskA(W_a:{w1[0].item():.3f}, W_b:{w1[1].item():.3f}), "
+            f"TaskB(W_a:{w2[0].item():.3f}, W_b:{w2[1].item():.3f}), "
+            f"TaskLR(W_a:{w3[0].item():.3f}, W_b:{w3[1].item():.3f})"
+        )
+
     # --- Calculate Accuracy Metrics ---
     
     # 1. Overall Accuracy (Element-wise)
@@ -162,11 +248,62 @@ def main():
         
     model.to(device)
 
-    # Create loss function from config
-    criterion = get_loss_function(config)
-    criterion.to(device)
+    # --- MODIFICATION: Create loss function based on model type ---
+    is_multitask = isinstance(model.module if hasattr(model, 'module') else model, MultiTaskTransformer)
     
-    optimizer = optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
+    if is_multitask:
+        logger.info("Multi-task model detected. Creating separate loss functions for each head.")
+        pos_weights = config['training']['pos_weight']
+        if len(pos_weights) != 3:
+            raise ValueError("pos_weight must contain exactly 3 values for the multi-task model.")
+        
+        # Create a separate criterion for each task, with its own pos_weight
+        criterion_a = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weights[0]], device=device))
+        criterion_b = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weights[1]], device=device))
+        criterion_lr = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weights[2]], device=device))
+        
+        criterion = (criterion_a, criterion_b, criterion_lr) # Pass as a tuple
+    else:
+        logger.info("Single-task model detected. Using global loss function from config.")
+        criterion = get_loss_function(config)
+        criterion.to(device)
+    
+    # --- MODIFICATION: Set different learning rates for adaptive weights ---
+    if is_multitask:
+        logger.info("Setting up optimizer with different learning rates for adaptive weights.")
+        
+        inner_model = model.module if hasattr(model, 'module') else model
+        
+        # Identify the adaptive weight parameters (logits)
+        adaptive_weights_params_ids = {id(p) for p in [
+            inner_model.task1_logits, 
+            inner_model.task2_logits, 
+            inner_model.task3_logits
+        ]}
+        
+        # Separate parameters into two groups
+        base_params = [p for p in inner_model.parameters() if id(p) not in adaptive_weights_params_ids]
+        adaptive_weights_params = [p for p in inner_model.parameters() if id(p) in adaptive_weights_params_ids]
+
+        # Get base learning rate from config
+        base_lr = config['training']['learning_rate']
+        
+        # Get a multiplier for the adaptive weights' LR, defaulting to 100x
+        lr_multiplier = config['training'].get('adaptive_lr_multiplier', 100.0)
+        adaptive_lr = base_lr * lr_multiplier
+        
+        logger.info(f"Base LR: {base_lr}, Adaptive Weights LR: {adaptive_lr} (Multiplier: {lr_multiplier}x)")
+
+        param_groups = [
+            {'params': base_params},
+            {'params': adaptive_weights_params, 'lr': adaptive_lr}
+        ]
+        
+        optimizer = optim.AdamW(param_groups, lr=base_lr, weight_decay=config['training']['weight_decay'])
+
+    else: # Original optimizer setup for single-task models
+        optimizer = optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
+    
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config['training']['epochs'])
 
     best_val_loss = float('inf')
@@ -175,9 +312,9 @@ def main():
     
     logger.info("--- Starting Training ---")
     for epoch in range(config['training']['epochs']):
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, epoch, logger)
+        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, epoch, logger, is_multitask)
         val_loss, val_accuracy, val_exact_match = validate_one_epoch(
-            model, val_loader, criterion, device, epoch, logger, writer, results_dir, log_every_n_epochs
+            model, val_loader, criterion, device, epoch, logger, writer, results_dir, log_every_n_epochs, is_multitask
         )
         
         scheduler.step()

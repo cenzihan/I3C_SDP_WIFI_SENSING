@@ -54,7 +54,7 @@ vit:
   # 可以是单个整数（例如 10，代表 10x10 的方形Patch），
   # 也可以是 [height, width] 格式的列表（例如 [4, 25]，代表 4x25 的矩形Patch）。
   # 输入大小为[16,70,250]，所以用的[7,10]
-  patch_size: [7, 10]
+  patch_size: [10, 10]
 
 # --- 训练过程配置 ---
 training:
@@ -73,10 +73,29 @@ training:
   # 每隔多少个epoch记录一次可视化结果（如混淆矩阵）
   log_every_n_epochs: 10
   
+  # Multiplier for the learning rate of the adaptive stream weights.
+  # This value is used to make the adaptive weights learn faster or slower
+  # than the rest of the model. A value of 10.0 means their LR will be 10x
+  # the base learning_rate.
+  adaptive_lr_multiplier: 10.0
+
   # --- 损失函数配置 ---
   # 用于BCE损失的类别权重，手动设置为一个预估值，用于缓解类别不平衡问题
   # 计算方式: pos_weight = 负样本数 / 正样本数
-  pos_weight: [4.4, 4, 3.5]
+  # --- MODIFICATION: Add initial weights configuration ---
+  # These values should be updated with the results from analyze_features.py
+  initial_weights:
+    "Predict Room A": 
+      weight_a: 0.52
+      weight_b: 0.48
+    "Predict Room B":
+      weight_a: 0.48
+      weight_b: 0.52
+    "Predict Living Room":
+      weight_a: 0.5
+      weight_b: 0.5
+  
+  pos_weight: [4.4, 4, 3.5] # Placeholder, should be recalculated if needed
   
   # 损失函数组合配置, 可以配置一个或多个损失函数及其权重
   loss_components:

@@ -89,17 +89,17 @@ def main():
     # --- Pre-defined list of files to check ---
     files_to_check = [
         # OfficeScenario Glass_Wall_Scenario
-        # "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig2/Fan/Processed_Data/1m.txt",
-        # "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig2/Fan/Processed_Data/2m.txt",
-        # "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig2/Fan/Processed_Data/3m.txt",
-        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig2/Fan/Processed_Data/4m.txt",
-        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/80MHzConfig2fixgain/Fan/Processed_Data/1m.txt",
-        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/80MHzConfig2fixgain/Fan/Processed_Data/2m.txt",
-        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/80MHzConfig2fixgain/Fan/Processed_Data/3m.txt",
-        # "datasets/OfficeScenario/Glass_Wall_Scenario/Groundtruth/ceiling_mount/20MHzConfig1/Fan/1m.txt",
-        # "datasets/OfficeScenario/Glass_Wall_Scenario/Groundtruth/ceiling_mount/20MHzConfig1/Fan/2m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig1/Fan/Processed_Data/1m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig1/Fan/Processed_Data/2m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig1/Fan/Processed_Data/3m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/20MHzConfig1/Fan/Processed_Data/4m.txt",
+        # "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/80MHzConfig2fixgain/Fan/Processed_Data/1m.txt",
+        # "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/80MHzConfig2fixgain/Fan/Processed_Data/2m.txt",
+        # "datasets/OfficeScenario/Glass_Wall_Scenario/Data/ceiling_mount/80MHzConfig2fixgain/Fan/Processed_Data/3m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Groundtruth/ceiling_mount/20MHzConfig2/Fan/1m.txt",
+        "datasets/OfficeScenario/Glass_Wall_Scenario/Groundtruth/ceiling_mount/20MHzConfig2/Fan/2m.txt",
         
-        "datasets/OfficeScenario/Glass_Wall_Scenario/Groundtruth/ceiling_mount/80MHzConfig2fixgain/Fan/1m.txt",
+        # "datasets/OfficeScenario/Glass_Wall_Scenario/Groundtruth/ceiling_mount/80MHzConfig2fixgain/Fan/1m.txt",
 
         # OfficeScenario Meeting_Room_Scene_2
         # "datasets/OfficeScenario/Meeting_Room_Scene_2/Room1/Groundtruth/Stream1x4_Config1/001_0_0000_3.txt",
