@@ -77,7 +77,9 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, logg
             # Combine losses (simple sum for now)
             loss = loss_a + loss_b + loss_lr
         else: # Original logic for single-output models
-            outputs = model(inputs_a, inputs_b)
+            # --- FIX: Combine the two input streams for single-stream models ---
+            inputs_combined = torch.cat((inputs_a, inputs_b), dim=1)
+            outputs = model(inputs_combined)
             loss = criterion(outputs, labels)
 
         loss.backward()
@@ -144,7 +146,9 @@ def validate_one_epoch(model, dataloader, criterion, device, epoch, logger, writ
                 outputs_combined = torch.cat([output_a, output_b, output_lr], dim=1)
                 
             else: # Original logic for single-output models
-                outputs_combined = model(inputs_a, inputs_b)
+                # --- FIX: Combine the two input streams for single-stream models ---
+                inputs_combined = torch.cat((inputs_a, inputs_b), dim=1)
+                outputs_combined = model(inputs_combined)
                 loss = criterion(outputs_combined, labels)
 
             total_loss += loss.item()
@@ -182,19 +186,33 @@ def validate_one_epoch(model, dataloader, criterion, device, epoch, logger, writ
     # --- Calculate Accuracy Metrics ---
     
     # 1. Overall Accuracy (Element-wise)
-    # This checks how many individual labels (out of samples * num_classes) are correct.
     overall_accuracy = (all_preds == all_labels).mean() * 100
     
     # 2. Exact Match Ratio (Row-wise)
-    # This checks how many full rows (samples) are predicted perfectly.
     exact_matches = np.all(all_preds == all_labels, axis=1).sum()
     exact_match_ratio = (exact_matches / len(all_labels)) * 100
     
-    logger.info(
+    # --- MODIFICATION: Calculate and log per-task accuracy ---
+    log_message = (
         f"Epoch {epoch+1} - Validation Loss: {avg_loss:.4f}, "
         f"Overall Accuracy: {overall_accuracy:.2f}%, "
         f"Exact Match Ratio: {exact_match_ratio:.2f}%"
     )
+
+    if is_multitask:
+        # Assuming the order is Room A, Room B, Living Room
+        task_names = ["RoomA", "RoomB", "LivingRoom"]
+        per_task_accuracies = (all_preds == all_labels).mean(axis=0) * 100
+        
+        accuracy_log = []
+        for i, task_name in enumerate(task_names):
+            # Also log to TensorBoard
+            writer.add_scalar(f'Accuracy/validation_{task_name}', per_task_accuracies[i], epoch)
+            accuracy_log.append(f"Acc_{task_name}: {per_task_accuracies[i]:.2f}%")
+        
+        log_message += ", " + ", ".join(accuracy_log)
+
+    logger.info(log_message)
 
     # --- Generate and Save Confusion Matrix ---
     if (epoch + 1) % log_every_n_epochs == 0:
@@ -211,7 +229,11 @@ def main():
     set_seed(config['seed'])
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_name = f"{config['project_name']}/{timestamp}"
+    
+    # --- MODIFICATION: Use model name in the run name for better organization ---
+    model_name = config['model']['name']
+    run_name = f"{model_name}/{timestamp}"
+    
     log_dir = f"training/{run_name}"
     results_dir = f"results/{run_name}" # Create a corresponding results directory
     os.makedirs(log_dir, exist_ok=True)
@@ -268,8 +290,8 @@ def main():
         criterion = get_loss_function(config)
         criterion.to(device)
     
-    # --- MODIFICATION: Set different learning rates for adaptive weights ---
-    if is_multitask:
+    # --- MODIFICATION: Conditionally set different LR for adaptive weights ---
+    if is_multitask and config['training'].get('use_adaptive_weights', True):
         logger.info("Setting up optimizer with different learning rates for adaptive weights.")
         
         inner_model = model.module if hasattr(model, 'module') else model
@@ -288,8 +310,8 @@ def main():
         # Get base learning rate from config
         base_lr = config['training']['learning_rate']
         
-        # Get a multiplier for the adaptive weights' LR, defaulting to 100x
-        lr_multiplier = config['training'].get('adaptive_lr_multiplier', 100.0)
+        # Get a multiplier for the adaptive weights' LR
+        lr_multiplier = config['training'].get('adaptive_lr_multiplier', 10.0)
         adaptive_lr = base_lr * lr_multiplier
         
         logger.info(f"Base LR: {base_lr}, Adaptive Weights LR: {adaptive_lr} (Multiplier: {lr_multiplier}x)")
@@ -301,7 +323,9 @@ def main():
         
         optimizer = optim.AdamW(param_groups, lr=base_lr, weight_decay=config['training']['weight_decay'])
 
-    else: # Original optimizer setup for single-task models
+    else: # Original optimizer setup for other models or when adaptive weights are off
+        if is_multitask:
+             logger.info("Adaptive weights are disabled. Using a single learning rate for all parameters.")
         optimizer = optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training']['weight_decay'])
     
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config['training']['epochs'])

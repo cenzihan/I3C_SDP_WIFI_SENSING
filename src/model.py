@@ -196,50 +196,50 @@ class MultiTaskTransformer(nn.Module):
         super(MultiTaskTransformer, self).__init__()
         
         self.embed_dim = config['model']['embed_dim']
+        self.use_adaptive_weights = config['training'].get('use_adaptive_weights', True)
         
-        # --- 1. Adaptive Weighting Layer (Re-parameterized with Logits) ---
-        # We create 3 pairs of logits, one for each task. These are trainable 
-        # parameters. The softmax function, applied in the forward pass, will 
-        # ensure that the weights generated for each task always sum to 1.
-        if initial_weights is None:
-            # Default to 0.5/0.5 weights if none are provided.
-            # The corresponding logits for [0.5, 0.5] are [0, 0].
-            logits1 = torch.zeros(2, dtype=torch.float32)
-            logits2 = torch.zeros(2, dtype=torch.float32)
-            logits3 = torch.zeros(2, dtype=torch.float32)
+        # --- 1. Adaptive Weighting Layer (Conditionally Initialized) ---
+        # The adaptive weights are only created if the config flag is True.
+        if self.use_adaptive_weights:
+            if initial_weights is None:
+                # Default to 0.5/0.5 weights if none are provided.
+                logits1 = torch.zeros(2, dtype=torch.float32)
+                logits2 = torch.zeros(2, dtype=torch.float32)
+                logits3 = torch.zeros(2, dtype=torch.float32)
+            else:
+                def probs_to_logits(p_a, p_b):
+                    """Converts a pair of probabilities into a pair of logits."""
+                    p_a = max(p_a, 1e-6)
+                    p_b = max(p_b, 1e-6)
+                    total = p_a + p_b
+                    p_a /= total
+                    p_b /= total
+                    l_a = torch.log(torch.tensor(p_a / p_b, dtype=torch.float32))
+                    l_b = torch.tensor(0.0, dtype=torch.float32)
+                    return torch.stack([l_a, l_b])
+
+                logits1 = probs_to_logits(
+                    initial_weights['Predict Room A']['weight_a'], 
+                    initial_weights['Predict Room A']['weight_b']
+                )
+                logits2 = probs_to_logits(
+                    initial_weights['Predict Room B']['weight_a'], 
+                    initial_weights['Predict Room B']['weight_b']
+                )
+                logits3 = probs_to_logits(
+                    initial_weights['Predict Living Room']['weight_a'], 
+                    initial_weights['Predict Living Room']['weight_b']
+                )
+
+            self.task1_logits = nn.Parameter(logits1)
+            self.task2_logits = nn.Parameter(logits2)
+            self.task3_logits = nn.Parameter(logits3)
         else:
-            def probs_to_logits(p_a, p_b):
-                """Converts a pair of probabilities into a pair of logits."""
-                # Add epsilon to prevent log(0) and division by zero
-                p_a = max(p_a, 1e-6)
-                p_b = max(p_b, 1e-6)
-                # Normalize just in case they don't sum to 1
-                total = p_a + p_b
-                p_a /= total
-                p_b /= total
-                # To get logits from probabilities for a 2-element softmax,
-                # we can set one logit to 0 for stability and calculate the other.
-                # l_a = log(p_a / p_b)
-                l_a = torch.log(torch.tensor(p_a / p_b, dtype=torch.float32))
-                l_b = torch.tensor(0.0, dtype=torch.float32)
-                return torch.stack([l_a, l_b])
-
-            logits1 = probs_to_logits(
-                initial_weights['Predict Room A']['weight_a'], 
-                initial_weights['Predict Room A']['weight_b']
-            )
-            logits2 = probs_to_logits(
-                initial_weights['Predict Room B']['weight_a'], 
-                initial_weights['Predict Room B']['weight_b']
-            )
-            logits3 = probs_to_logits(
-                initial_weights['Predict Living Room']['weight_a'], 
-                initial_weights['Predict Living Room']['weight_b']
-            )
-
-        self.task1_logits = nn.Parameter(logits1)
-        self.task2_logits = nn.Parameter(logits2)
-        self.task3_logits = nn.Parameter(logits3)
+            # If not using adaptive weights, set logits to None.
+            # The forward pass will use fixed weights of 1.0.
+            self.task1_logits = None
+            self.task2_logits = None
+            self.task3_logits = None
         
         # --- 2. Dual-Stream Embedding Layers (Shared across tasks) ---
         self.conv_embed_a = nn.Conv2d(
@@ -298,21 +298,31 @@ class MultiTaskTransformer(nn.Module):
         return shared_features.mean(dim=1)
 
     def forward(self, src_a, src_b):
-        # --- Generate weights from logits using softmax ---
-        w1 = self.weights_task1
-        w2 = self.weights_task2
-        w3 = self.weights_task3
+        # --- MODIFICATION: Conditionally use adaptive or fixed weights ---
+        if self.use_adaptive_weights:
+            # Generate weights from logits using softmax
+            w1 = self.weights_task1
+            w2 = self.weights_task2
+            w3 = self.weights_task3
+            w1a, w1b = w1[0], w1[1]
+            w2a, w2b = w2[0], w2[1]
+            w3a, w3b = w3[0], w3[1]
+        else:
+            # Use fixed weights of 1.0 for simple stream addition
+            w1a, w1b = 1.0, 1.0
+            w2a, w2b = 1.0, 1.0
+            w3a, w3b = 1.0, 1.0
         
         # Task 1: Predict Room A
-        features_task1 = self._get_shared_features(src_a, src_b, w1[0], w1[1])
+        features_task1 = self._get_shared_features(src_a, src_b, w1a, w1b)
         output_a = self.head_a(features_task1)
         
         # Task 2: Predict Room B
-        features_task2 = self._get_shared_features(src_a, src_b, w2[0], w2[1])
+        features_task2 = self._get_shared_features(src_a, src_b, w2a, w2b)
         output_b = self.head_b(features_task2)
         
         # Task 3: Predict Living Room
-        features_task3 = self._get_shared_features(src_a, src_b, w3[0], w3[1])
+        features_task3 = self._get_shared_features(src_a, src_b, w3a, w3b)
         output_lr = self.head_lr(features_task3)
         
         return output_a, output_b, output_lr
