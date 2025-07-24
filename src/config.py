@@ -2,7 +2,7 @@ import yaml
 import argparse
 import os
 
-def get_config():
+def get_config(default_config_path=None):
     """
     Loads configuration from a YAML file and merges it with command-line arguments.
     Command-line arguments override YAML file settings.
@@ -12,7 +12,7 @@ def get_config():
     )
     
     # --- Path and Data Arguments ---
-    parser.add_argument('--config_path', type=str, default='config.yml', help='Path to the YAML configuration file.')
+    parser.add_argument('--config_path', type=str, default=default_config_path, help='Path to the YAML configuration file.')
     parser.add_argument('--dataset_root', type=str, help='Root directory of the dataset.')
     parser.add_argument('--project_name', type=str, help='Name of the project for logging purposes.')
     parser.add_argument('--scenes_to_process', nargs='+', help='List of scene folders to process.')
@@ -44,19 +44,29 @@ def get_config():
 
     args = parser.parse_args()
 
+    # Determine the final config path
+    config_path_to_load = args.config_path
+    if not config_path_to_load:
+        # If no default was provided and no CLI arg was given, fall back to the main config.
+        config_path_to_load = 'config.yml'
+
     # Load config from YAML file
     config = {}
-    if args.config_path and os.path.exists(args.config_path):
-        with open(args.config_path, 'r') as f:
+    if os.path.exists(config_path_to_load):
+        with open(config_path_to_load, 'r') as f:
             try:
                 config = yaml.safe_load(f)
+                # Store the actual path used for loading
+                config['config_path_loaded'] = config_path_to_load
             except yaml.YAMLError as exc:
                 print(exc)
+    else:
+        print(f"Warning: Config file not found at '{config_path_to_load}'. Using command-line args only.")
+
 
     # Merge YAML config with command-line arguments
     # CLI arguments take precedence
-    for key, value in vars(args).items():
-        if value is not None:
-            config[key] = value
+    cli_args = {k: v for k, v in vars(args).items() if v is not None}
+    config.update(cli_args)
             
     return config 

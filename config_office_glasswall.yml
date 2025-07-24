@@ -1,0 +1,69 @@
+# --- Office Scenario: Glass Wall ---
+# --- 项目和路径配置 ---
+project_name: "sdp_office_glasswall"
+preprocessed_data_dir: "datasets/predata/Office_Glass_Wall"
+
+# 随机种子，用于确保实验的可复现性
+seed: 42
+
+# --- 数据集划分策略配置 ---
+# 'preprocess': 在预处理阶段按文件组划分。
+# 'on_the_fly': 训练时将所有指定场景的数据合并后，进行一次总的随机划分。
+# 'group_level_random_split': 训练时对每个原始文件组产生的样本进行内部随机划分，然后合并。最精细的划分。
+data_split:
+  strategy: 'group_level_random_split'
+  val_size: 0.2 # 预处理时已使用此比例
+
+# 参与训练的数据源（对应 preprocessed_data_dir 下的子目录名）
+# 对于此配置，脚本会自动加载 Office_Glass_Wall 下的 train/val
+training_data_sources:
+  - "Office_Glass_Wall"
+
+# --- 模型配置 ---
+model:
+  name: "vit" # 可选: "simple_cnn", "vit"
+  # 输入形状: (Batch, 40, 100, 64) -> (B, C, H, W)
+  input_channels: 40 
+  num_classes: 5 # 对应5个文件 (1m-5m) 的标签
+  
+  # --- Transformer/ViT 通用参数 ---
+  embed_dim: 256
+  num_heads: 8
+  num_layers: 4 # 对于新数据集，可以从较少的层数开始
+  hidden_dim: 1024
+  dropout: 0.1
+
+# --- ViT (Vision Transformer) 专属配置 ---
+vit:
+  # Patch大小，需要能被 (100, 64) 整除
+  patch_size: [10, 8]
+
+# --- 训练过程配置 ---
+training:
+  model_save_name: "{project_name}_{model_name}_{timestamp}_best.pth"
+  epochs: 200
+  batch_size: 64 # 从一个较小的值开始
+  learning_rate: 0.001 # --- MODIFICATION: Increased learning rate ---
+  optimizer: "AdamW"
+  lr_scheduler: "ReduceLROnPlateau" # --- MODIFICATION: Specify the new scheduler ---
+  weight_decay: 0.001
+  patience: 30 # --- MODIFICATION: Increased early stopping patience ---
+  log_every_n_epochs: 5
+  
+  # 损失函数: 对于Office场景的多标签分类，BCE是标准选择
+
+  pos_weight: [3.3, 3.2, 3.4, 3.3, 3.4] 
+  loss_components:
+    # --- MODIFICATION: Switch to BCEWithLogitsLoss with pos_weight ---
+    - name: "bce"
+      weight: 0 # Use BCE as the sole loss function
+      params: {}
+    - name: "focal"
+      weight: 1 
+      params:
+        alpha: 0.25
+        gamma: 2.0
+
+# --- 环境与运行配置 ---
+gpus: "0" # 从单个GPU开始训练
+num_workers: 4 
