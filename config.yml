@@ -28,33 +28,29 @@ data_split:
 # 可以是单个场景，也可以是多个场景的组合。
 # 使用 'all' 关键字可以自动包含所有已处理的场景。
 training_data_sources:
+  - "Home_Scene2"
   - "Home_Scene1"
-
 # 每个2秒时间窗内，保留的最大数据包数量
 # 如果数据包数量不足，会进行零填充
 max_packets_per_interval: 70
 
+# --- 数据特征配置 ---
+# 是否在输入中包含 RSSI 和 Gain 信息
+include_rssi_gain: true  
+
 # --- 模型配置 ---
 model:
-  name: "vit" # 模型选择，可选: "simple_transformer", "vit"
+  name: "simple_transformer" # 模型选择，可选: "simple_transformer", "multi_task_transformer", "separate_task_transformer"
   
   # --- 模型通用参数 ---
-  input_channels: 16 # 输入特征图的通道数 (2个房间 * (4个实部dB流 + 4个虚部dB流))
-  feature_dim: 250 # 特征维度 (即每个天线流的子载波数量)
+  input_channels: 16 # 输入特征图的通道数 (2个房间 * 8个通道)
+  feature_dim: 254 # 特征维度 (当include_rssi_gain=true时为254, 否则为250)
   num_classes: 3 # 分类任务的类别数 (即房间数量)
   embed_dim: 256 # Transformer模型的内部嵌入维度
   num_heads: 8 # Transformer中的多头注意力头数
   num_layers: 6 # Transformer编码器的层数
   hidden_dim: 1024 # Transformer前馈网络的隐藏层维度
   dropout: 0.1 # Dropout比例
-
-# --- ViT (Vision Transformer) 专属配置 ---
-vit:
-  # Vision Transformer 的 Patch 大小。
-  # 可以是单个整数（例如 10，代表 10x10 的方形Patch），
-  # 也可以是 [height, width] 格式的列表（例如 [4, 25]，代表 4x25 的矩形Patch）。
-  # 输入大小为[16,70,250]，所以用的[7,10]
-  patch_size: [10, 10]
 
 # --- 训练过程配置 ---
 training:
@@ -64,7 +60,7 @@ training:
   
   # 训练的总轮数
   epochs: 500
-  batch_size: 512 # 每个批次的大小
+  batch_size: 256 # 每个批次的大小 (从512减少到256以提高速度)
   learning_rate: 0.0001 # 学习率
   optimizer: "AdamW" # 优化器类型
   weight_decay: 0.01 # 权重衰减 (L2正则化)

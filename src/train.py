@@ -14,7 +14,7 @@ from .utils import set_seed, get_logger
 from .model import get_model
 from .dataset import create_dataloaders
 from .losses import get_loss_function
-from .model import MultiTaskTransformer # Added import for MultiTaskTransformer
+from .model import MultiTaskTransformer, SeparateTaskTransformer # Added import
 
 
 def log_confusion_matrix(y_true, y_pred, epoch, writer, results_dir, class_names=None):
@@ -87,11 +87,9 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, logg
         
         total_loss += loss.item()
         
-        # --- MODIFICATION: Log adaptive weights to progress bar ---
-        if isinstance(model, MultiTaskTransformer) or (hasattr(model, 'module') and isinstance(model.module, MultiTaskTransformer)):
-            # Handle DataParallel wrapper
-            inner_model = model.module if hasattr(model, 'module') else model
-            
+        # --- MODIFICATION: Log adaptive weights to progress bar for any supported multi-task model ---
+        inner_model = model.module if hasattr(model, 'module') else model
+        if isinstance(inner_model, (MultiTaskTransformer, SeparateTaskTransformer)):
             # Access weights via the new properties
             w1 = inner_model.weights_task1
             w2 = inner_model.weights_task2
@@ -168,9 +166,8 @@ def validate_one_epoch(model, dataloader, criterion, device, epoch, logger, writ
     all_labels = np.vstack(all_labels)
     
     # --- MODIFICATION: Log final weights after validation epoch ---
-    if isinstance(model, MultiTaskTransformer) or (hasattr(model, 'module') and isinstance(model.module, MultiTaskTransformer)):
-        inner_model = model.module if hasattr(model, 'module') else model
-        
+    inner_model = model.module if hasattr(model, 'module') else model
+    if isinstance(inner_model, (MultiTaskTransformer, SeparateTaskTransformer)):
         # Access weights via the new properties
         w1 = inner_model.weights_task1
         w2 = inner_model.weights_task2
@@ -271,7 +268,8 @@ def main():
     model.to(device)
 
     # --- MODIFICATION: Create loss function based on model type ---
-    is_multitask = isinstance(model.module if hasattr(model, 'module') else model, MultiTaskTransformer)
+    inner_model = model.module if hasattr(model, 'module') else model
+    is_multitask = isinstance(inner_model, (MultiTaskTransformer, SeparateTaskTransformer))
     
     if is_multitask:
         logger.info("Multi-task model detected. Creating separate loss functions for each head.")
@@ -295,13 +293,18 @@ def main():
         logger.info("Setting up optimizer with different learning rates for adaptive weights.")
         
         inner_model = model.module if hasattr(model, 'module') else model
+
+        # Logic to find adaptive weights is now model-specific
+        adaptive_params_list = []
+        if isinstance(inner_model, (MultiTaskTransformer, SeparateTaskTransformer)):
+             adaptive_params_list.extend([
+                inner_model.task1_logits, 
+                inner_model.task2_logits, 
+                inner_model.task3_logits
+            ])
         
         # Identify the adaptive weight parameters (logits)
-        adaptive_weights_params_ids = {id(p) for p in [
-            inner_model.task1_logits, 
-            inner_model.task2_logits, 
-            inner_model.task3_logits
-        ]}
+        adaptive_weights_params_ids = {id(p) for p in adaptive_params_list}
         
         # Separate parameters into two groups
         base_params = [p for p in inner_model.parameters() if id(p) not in adaptive_weights_params_ids]
@@ -366,6 +369,7 @@ def main():
             logger.info(f"Validation loss improved. Saved model to {model_save_path}")
         else:
             epochs_no_improve += 1
+            logger.info(f"Validation loss did not improve for {epochs_no_improve} epoch(s). Best so far: {best_val_loss:.4f}")
             
         if epochs_no_improve >= config['training']['patience']:
             logger.info(f"Early stopping triggered after {config['training']['patience']} epochs with no improvement.")

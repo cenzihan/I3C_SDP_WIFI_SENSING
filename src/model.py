@@ -50,7 +50,7 @@ class SimpleTransformer(nn.Module):
 
     def forward(self, src):
         # src shape: (batch_size, channels, seq_len, features)
-        # e.g., (32, 16, 70, 250)
+        # e.g., (32, 16, 70, 254) or (32, 16, 70, 250)
         
         x = self.conv_embed(src) # -> (batch_size, embed_dim, seq_len, 1)
         x = x.squeeze(3) # -> (batch_size, embed_dim, seq_len)
@@ -67,70 +67,7 @@ class SimpleTransformer(nn.Module):
         output = self.fc_out(output)
         return output
 
-class ViT(nn.Module):
-    def __init__(self, config):
-        super(ViT, self).__init__()
-        # Image size is (seq_len, feature_dim) -> (70, 250)
-        # Channels is 16
-        image_size = (config['max_packets_per_interval'], config['model']['feature_dim']) 
-        
-        patch_size_config = config['vit']['patch_size']
-        if isinstance(patch_size_config, int):
-            patch_size = (patch_size_config, patch_size_config)
-        else:
-            patch_size = tuple(patch_size_config)
-
-        num_patches = (image_size[0] // patch_size[0]) * (image_size[1] // patch_size[1])
-        patch_dim = config['model']['input_channels'] * patch_size[0] * patch_size[1]
-
-        self.patch_embedding = nn.Linear(patch_dim, config['model']['embed_dim'])
-        self.position_embedding = nn.Parameter(torch.randn(1, num_patches + 1, config['model']['embed_dim']))
-        self.cls_token = nn.Parameter(torch.randn(1, 1, config['model']['embed_dim']))
-        
-        encoder_layers = nn.TransformerEncoderLayer(
-            d_model=config['model']['embed_dim'],
-            nhead=config['model']['num_heads'],
-            dim_feedforward=config['model']['hidden_dim'],
-            dropout=config['model']['dropout'],
-            batch_first=True
-        )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers=config['model']['num_layers'])
-        
-        self.mlp_head = nn.Sequential(
-            nn.LayerNorm(config['model']['embed_dim']),
-            nn.Linear(config['model']['embed_dim'], config['model']['num_classes'])
-        )
-
-        self.patch_size = patch_size
-        self.embed_dim = config['model']['embed_dim']
-
-    def forward(self, img):
-        # img shape: (batch_size, channels, height, width) -> (b, 16, 70, 250)
-        b, c, h, w = img.shape
-        p_h, p_w = self.patch_size
-
-        # Create patches
-        patches = img.unfold(2, p_h, p_h).unfold(3, p_w, p_w) # -> (b, c, num_patches_h, num_patches_w, p_h, p_w)
-        patches = patches.contiguous().view(b, c, -1, p_h, p_w) # -> (b, c, num_patches, p_h, p_w)
-        patches = patches.permute(0, 2, 1, 3, 4).contiguous() # -> (b, num_patches, c, p_h, p_w)
-        patches = patches.view(b, patches.size(1), -1) # -> (b, num_patches, c*p_h*p_w)
-
-        # Patch embedding
-        x = self.patch_embedding(patches) # -> (b, num_patches, embed_dim)
-        
-        # Add classification token
-        cls_tokens = self.cls_token.expand(b, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1) # -> (b, num_patches+1, embed_dim)
-        
-        # Add positional embedding
-        x += self.position_embedding # -> (b, num_patches+1, embed_dim)
-        
-        # Transformer
-        x = self.transformer_encoder(x)
-        
-        # Classification head
-        cls_token_final = x[:, 0]
-        return self.mlp_head(cls_token_final)
+# 删除ViT类定义和相关内容
 
 
 class DualStreamTransformer(nn.Module):
@@ -141,13 +78,14 @@ class DualStreamTransformer(nn.Module):
         self.seq_len = config['max_packets_per_interval']
         
         # --- MODIFICATION: Two separate embedding layers for each stream ---
+        # Each stream has 8 channels with 254 or 250 features
         self.conv_embed_a = nn.Conv2d(
-            in_channels=config['model']['input_channels'] // 2, # Halved for each stream
+            in_channels=config['model']['input_channels'] // 2, # 8 channels per stream
             out_channels=self.embed_dim, 
             kernel_size=(1, config['model']['feature_dim'])
         )
         self.conv_embed_b = nn.Conv2d(
-            in_channels=config['model']['input_channels'] // 2, # Halved for each stream
+            in_channels=config['model']['input_channels'] // 2, # 8 channels per stream
             out_channels=self.embed_dim, 
             kernel_size=(1, config['model']['feature_dim'])
         )
@@ -168,6 +106,7 @@ class DualStreamTransformer(nn.Module):
 
     def forward(self, src_a, src_b):
         # src_a and src_b shape: (batch_size, channels/2, seq_len, features)
+        # Now each has 8 channels with 254 or 250 features
         
         # Process stream A
         x_a = self.conv_embed_a(src_a) # -> (batch_size, embed_dim, seq_len, 1)
@@ -242,13 +181,14 @@ class MultiTaskTransformer(nn.Module):
             self.task3_logits = None
         
         # --- 2. Dual-Stream Embedding Layers (Shared across tasks) ---
+        # Each stream has 8 channels with 254 or 250 features
         self.conv_embed_a = nn.Conv2d(
-            in_channels=config['model']['input_channels'] // 2,
+            in_channels=config['model']['input_channels'] // 2,  # 8 channels per stream
             out_channels=self.embed_dim, 
             kernel_size=(1, config['model']['feature_dim'])
         )
         self.conv_embed_b = nn.Conv2d(
-            in_channels=config['model']['input_channels'] // 2,
+            in_channels=config['model']['input_channels'] // 2,  # 8 channels per stream
             out_channels=self.embed_dim, 
             kernel_size=(1, config['model']['feature_dim'])
         )
@@ -328,20 +268,159 @@ class MultiTaskTransformer(nn.Module):
         return output_a, output_b, output_lr
 
 
+class SeparateTaskTransformer(nn.Module):
+    """
+    A multi-task transformer model where each task has its own independent 
+    transformer encoder body, but shares input embedding layers.
+    """
+    def __init__(self, config, initial_weights=None):
+        super(SeparateTaskTransformer, self).__init__()
+        
+        self.embed_dim = config['model']['embed_dim']
+        self.use_adaptive_weights = config['training'].get('use_adaptive_weights', True)
+        
+        # --- 1. Adaptive Weighting Layer (Conditionally Initialized) ---
+        if self.use_adaptive_weights:
+            if initial_weights is None:
+                logits1 = torch.zeros(2, dtype=torch.float32)
+                logits2 = torch.zeros(2, dtype=torch.float32)
+                logits3 = torch.zeros(2, dtype=torch.float32)
+            else:
+                def probs_to_logits(p_a, p_b):
+                    p_a = max(p_a, 1e-6)
+                    p_b = max(p_b, 1e-6)
+                    total = p_a + p_b
+                    p_a /= total
+                    p_b /= total
+                    l_a = torch.log(torch.tensor(p_a / p_b, dtype=torch.float32))
+                    l_b = torch.tensor(0.0, dtype=torch.float32)
+                    return torch.stack([l_a, l_b])
+
+                logits1 = probs_to_logits(initial_weights['Predict Room A']['weight_a'], initial_weights['Predict Room A']['weight_b'])
+                logits2 = probs_to_logits(initial_weights['Predict Room B']['weight_a'], initial_weights['Predict Room B']['weight_b'])
+                logits3 = probs_to_logits(initial_weights['Predict Living Room']['weight_a'], initial_weights['Predict Living Room']['weight_b'])
+
+            self.task1_logits = nn.Parameter(logits1)
+            self.task2_logits = nn.Parameter(logits2)
+            self.task3_logits = nn.Parameter(logits3)
+        else:
+            self.task1_logits = None
+            self.task2_logits = None
+            self.task3_logits = None
+        
+        # --- 2. Dual-Stream Embedding Layers (Shared across tasks) ---
+        # Each stream has 8 channels with 254 or 250 features
+        self.conv_embed_a = nn.Conv2d(in_channels=config['model']['input_channels'] // 2, out_channels=self.embed_dim, kernel_size=(1, config['model']['feature_dim']))
+        self.conv_embed_b = nn.Conv2d(in_channels=config['model']['input_channels'] // 2, out_channels=self.embed_dim, kernel_size=(1, config['model']['feature_dim']))
+        
+        # --- 3. Shared Positional Encoding & Separate Transformer Bodies ---
+        self.positional_encoding = PositionalEncoding(self.embed_dim, config['model']['dropout'])
+
+        def create_encoder():
+            encoder_layers = nn.TransformerEncoderLayer(
+                d_model=self.embed_dim, 
+                nhead=config['model']['num_heads'], 
+                dim_feedforward=config['model']['hidden_dim'], 
+                dropout=config['model']['dropout'],
+                batch_first=True
+            )
+            return nn.TransformerEncoder(encoder_layers, num_layers=config['model']['num_layers'])
+
+        self.transformer_encoder_a = create_encoder()
+        self.transformer_encoder_b = create_encoder()
+        self.transformer_encoder_lr = create_encoder()
+        
+        # --- 4. Multi-Head Classifier ---
+        self.head_a = nn.Linear(self.embed_dim, 1)
+        self.head_b = nn.Linear(self.embed_dim, 1)
+        self.head_lr = nn.Linear(self.embed_dim, 1)
+
+    @property
+    def weights_task1(self):
+        return torch.softmax(self.task1_logits, dim=0)
+    
+    @property
+    def weights_task2(self):
+        return torch.softmax(self.task2_logits, dim=0)
+
+    @property
+    def weights_task3(self):
+        return torch.softmax(self.task3_logits, dim=0)
+
+    def forward(self, src_a, src_b):
+        if self.use_adaptive_weights:
+            w1 = self.weights_task1
+            w2 = self.weights_task2
+            w3 = self.weights_task3
+            w1a, w1b = w1[0], w1[1]
+            w2a, w2b = w2[0], w2[1]
+            w3a, w3b = w3[0], w3[1]
+        else:
+            w1a, w1b = 1.0, 1.0
+            w2a, w2b = 1.0, 1.0
+            w3a, w3b = 1.0, 1.0
+        
+        # Task 1: Predict Room A (Separate Path)
+        x_a1 = self.conv_embed_a(src_a * w1a).squeeze(3).permute(0, 2, 1).contiguous()
+        x_b1 = self.conv_embed_b(src_b * w1b).squeeze(3).permute(0, 2, 1).contiguous()
+        features1 = self.positional_encoding(x_a1 + x_b1)
+        encoded1 = self.transformer_encoder_a(features1)
+        pooled1 = encoded1.mean(dim=1)
+        output_a = self.head_a(pooled1)
+        
+        # Task 2: Predict Room B (Separate Path)
+        x_a2 = self.conv_embed_a(src_a * w2a).squeeze(3).permute(0, 2, 1).contiguous()
+        x_b2 = self.conv_embed_b(src_b * w2b).squeeze(3).permute(0, 2, 1).contiguous()
+        features2 = self.positional_encoding(x_a2 + x_b2)
+        encoded2 = self.transformer_encoder_b(features2)
+        pooled2 = encoded2.mean(dim=1)
+        output_b = self.head_b(pooled2)
+        
+        # Task 3: Predict Living Room (Separate Path)
+        x_a3 = self.conv_embed_a(src_a * w3a).squeeze(3).permute(0, 2, 1).contiguous()
+        x_b3 = self.conv_embed_b(src_b * w3b).squeeze(3).permute(0, 2, 1).contiguous()
+        features3 = self.positional_encoding(x_a3 + x_b3)
+        encoded3 = self.transformer_encoder_lr(features3)
+        pooled3 = encoded3.mean(dim=1)
+        output_lr = self.head_lr(pooled3)
+        
+        return output_a, output_b, output_lr
+
+
 def get_model(config):
     """
     Model factory.
     """
     model_name = config['model']['name']
+    
+    # Dynamically set input_channels and feature_dim based on RSSI/Gain inclusion
+    if config.get('include_rssi_gain', True):
+        # 16 channels: 2 rooms * 8 channels
+        actual_input_channels = 16
+        # 254 features: 250 CSI + 2 RSSI + 2 Gain
+        actual_feature_dim = 254
+    else:
+        # 16 channels: 2 rooms * 8 channels
+        actual_input_channels = 16
+        # 250 features: only CSI features
+        actual_feature_dim = 250
+    
+    # Create a copy of config with updated parameters
+    model_config = config.copy()
+    model_config['model'] = model_config['model'].copy()
+    model_config['model']['input_channels'] = actual_input_channels
+    model_config['model']['feature_dim'] = actual_feature_dim
+    
     if model_name == 'simple_transformer':
-        return SimpleTransformer(config)
-    elif model_name == 'vit':
-        return ViT(config)
+        return SimpleTransformer(model_config)
     elif model_name == 'dual_stream_transformer':
-        return DualStreamTransformer(config)
+        return DualStreamTransformer(model_config)
     elif model_name == 'multi_task_transformer':
         # --- MODIFICATION: Read initial weights from the config file ---
         initial_weights = config.get('training', {}).get('initial_weights')
-        return MultiTaskTransformer(config, initial_weights=initial_weights)
+        return MultiTaskTransformer(model_config, initial_weights=initial_weights)
+    elif model_name == 'separate_task_transformer':
+        initial_weights = config.get('training', {}).get('initial_weights')
+        return SeparateTaskTransformer(model_config, initial_weights=initial_weights)
     else:
         raise ValueError(f"Unknown model name: {model_name}") 

@@ -37,27 +37,45 @@ def process_group(args):
         for i in range(int(duration // 2)):
             start_time, end_time = i * 2.0, (i + 1) * 2.0
             
-            # Packet Assembly for Room A
+            # Packet Assembly for Room A (now includes RSSI and Gain in feature dimension)
+            if config.get('include_rssi_gain', True):
+                padded_a = np.zeros((config['max_packets_per_interval'], 8, 254), dtype=np.float32)  # 8 channels, 254 features (250 CSI + 2 RSSI + 2 Gain)
+                packet_idx = 0
+                for ts, feat, _, _ in packets_a: # Unpack to ignore extra return values
+                    if start_time <= ts < end_time:
+                        if packet_idx < config['max_packets_per_interval']:
+                            padded_a[packet_idx] = feat  # Shape: (8, 254)
+                            packet_idx += 1
+            else:
+                # Fallback to original 8-channel format with only CSI features
             padded_a = np.zeros((config['max_packets_per_interval'], 8, 250), dtype=np.float32)
             packet_idx = 0
-            for ts, feat in packets_a:
+                for ts, feat, _, _ in packets_a: # Unpack to ignore
                 if start_time <= ts < end_time:
                     if packet_idx < config['max_packets_per_interval']:
-                        padded_a[packet_idx] = feat
+                            # Only use CSI features (first 250 dimensions)
+                            padded_a[packet_idx] = feat[:, :250]
                         packet_idx += 1
             
-            # Packet Assembly for Room B
+            # Packet Assembly for Room B (now includes RSSI and Gain in feature dimension)
+            if config.get('include_rssi_gain', True):
+                padded_b = np.zeros((config['max_packets_per_interval'], 8, 254), dtype=np.float32)  # 8 channels, 254 features
+                packet_idx = 0
+                for ts, feat, _, _ in packets_b: # Unpack to ignore
+                    if start_time <= ts < end_time:
+                        if packet_idx < config['max_packets_per_interval']:
+                            padded_b[packet_idx] = feat  # Shape: (8, 254)
+                            packet_idx += 1
+            else:
+                # Fallback to original 8-channel format with only CSI features
             padded_b = np.zeros((config['max_packets_per_interval'], 8, 250), dtype=np.float32)
             packet_idx = 0
-            for ts, feat in packets_b:
+                for ts, feat, _, _ in packets_b: # Unpack to ignore
                 if start_time <= ts < end_time:
                     if packet_idx < config['max_packets_per_interval']:
-                        padded_b[packet_idx] = feat
+                            # Only use CSI features (first 250 dimensions)
+                            padded_b[packet_idx] = feat[:, :250]
                         packet_idx += 1
-
-            # --- MODIFICATION: Keep data separate instead of fusing ---
-            # fused_data = np.concatenate((padded_a, padded_b), axis=1)
-            # data_tensor = torch.from_numpy(fused_data.transpose(1, 0, 2).copy())
             
             # Create two separate tensors, transposed for model input (C, H, W)
             tensor_a = torch.from_numpy(padded_a.transpose(1, 0, 2).copy())

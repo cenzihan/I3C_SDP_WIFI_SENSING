@@ -33,11 +33,6 @@ model:
   hidden_dim: 1024
   dropout: 0.1
 
-# --- ViT (Vision Transformer) 专属配置 ---
-vit:
-  # Patch大小，需要能被 (100, 64) 整除
-  patch_size: [10, 8]
-
 # --- 训练过程配置 ---
 training:
   model_save_name: "{project_name}_{model_name}_{timestamp}_best.pth"

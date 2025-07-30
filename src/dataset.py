@@ -13,11 +13,12 @@ from collections import defaultdict
 # A global flag to ensure the debug print happens only once
 _HAS_PARSED_NON_ZERO = False
 
-def parse_csi_line(line: str) -> Optional[Tuple[float, np.ndarray]]:
+def parse_csi_line(line: str) -> Optional[Tuple[float, np.ndarray, float, float]]:
     """
     Parses a single line of CSI data. It takes the dB value of the absolute
     real and imaginary parts separately and scales them to a [0, 1] range.
-    The final feature map has a shape of (8, 250).
+    The final feature map has a shape of (8, 254) - 250 CSI + 2 RSSI + 2 Gain.
+    Also extracts RSSI and Gain information.
     """
     CSI_LEN_80M = 1000
     CSI_LEN_160M = 992
@@ -28,6 +29,15 @@ def parse_csi_line(line: str) -> Optional[Tuple[float, np.ndarray]]:
 
     try:
         h, m, s_part = parts[0], parts[1], parts[2]
+        
+        # Correctly parse based on user's data format description
+        # [timestamp(3), rssi(2), mcs(1), gain(2), csi(1000)]
+        rssi1 = float(parts[3])
+        rssi2 = float(parts[4])
+        mcs = float(parts[5])   # MCS value (not used currently)
+        gain1 = float(parts[6])
+        gain2 = float(parts[7])
+        
         total_seconds = float(h) * 3600.0 + float(m) * 60.0 + float(s_part)
 
         csi_features_str = parts[8:]
@@ -59,9 +69,31 @@ def parse_csi_line(line: str) -> Optional[Tuple[float, np.ndarray]]:
         db_imag = 20 * np.log10(abs_imag + 1e-12)
         scaled_imag = np.clip((db_imag - MIN_DB) / (MAX_DB - MIN_DB), 0, 1)
         
-        feature_map = np.vstack((scaled_real, scaled_imag)).astype(np.float32)
+        # Combine CSI features
+        csi_feature_map = np.vstack((scaled_real, scaled_imag)).astype(np.float32)
         
-        return total_seconds, feature_map
+        # Normalize the four new features individually
+        norm_rssi1 = np.clip((rssi1 + 100) / 70, 0, 1)
+        norm_rssi2 = np.clip((rssi2 + 100) / 70, 0, 1)
+        norm_gain1 = np.clip(gain1 / 100, 0, 1)
+        norm_gain2 = np.clip(gain2 / 100, 0, 1)
+
+        # Create feature maps for each, broadcasting to all 8 channels
+        rssi1_features = np.full((8, 1), norm_rssi1, dtype=np.float32)
+        rssi2_features = np.full((8, 1), norm_rssi2, dtype=np.float32)
+        gain1_features = np.full((8, 1), norm_gain1, dtype=np.float32)
+        gain2_features = np.full((8, 1), norm_gain2, dtype=np.float32)
+        
+        # Concatenate CSI + RSSI(2) + Gain(2) along feature dimension
+        feature_map = np.concatenate([
+            csi_feature_map, 
+            rssi1_features, rssi2_features, 
+            gain1_features, gain2_features
+        ], axis=1)
+        # Result: (8, 254)
+        
+        # Return first RSSI/Gain for compatibility with other scripts for now
+        return total_seconds, feature_map, rssi1, gain1
 
     except (ValueError, IndexError):
         return None
